@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "llm-config-manager"
+version = "0.1.1"
+description = "A package to manage LLM configurations."
+readme = "README.md"
+license = {text = "MIT"}
+authors = [{name = "marc", email = "marc@earendil.works"}]
+requires-python = ">=3.10"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+dependencies = [
+    "PyYAML",
+]
+
+[project.optional-dependencies]
+test = ["pytest", "pytest-asyncio"]
+
+[project.scripts]
+llm-config-manager = "llm_config_manager.config_manager:main"
+
+[tool.pytest.ini_options]
+addopts = "-v"
+testpaths = ["tests"]
+

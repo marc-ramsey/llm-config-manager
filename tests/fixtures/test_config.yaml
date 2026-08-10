@@ -1,0 +1,74 @@
+# ── Test config — exercises full macro pipeline with new backends architecture ──
+models-start-port: 18000
+model-ports: 2
+logLevel: debug
+
+macros:
+  llama-args: --port ${PORT} --jinja -fa on -ngl 999 --no-mmap -np 1 --cache-type-k q8_0 --cache-type-v q8_0 -b 4096 -ub 512
+
+  ctx-default: 4096
+
+  reasoning-on: --reasoning-budget -1
+
+  reasoning-off: --reasoning-budget 0
+
+backends:
+  test-backend:
+    args: ${llama-args}
+  default: test-backend
+
+models:
+  llama-3.2-1b-instruct:
+    checkpoint: unsloth/Llama-3.2-1B-Instruct:Q4_K_M
+    args: |
+      ${reasoning-off}
+      --temp 0.7
+      --top-k 50
+      --top-p 0.9
+      --repeat-penalty 1.05
+      --ctx-size ${ctx-default}
+
+  llama-3.2-1b-think:
+    checkpoint: unsloth/Llama-3.2-1B-Instruct:Q4_K_M
+    args: |
+      ${reasoning-on}
+      --temp 0.7
+      --top-k 50
+      --top-p 0.9
+      --repeat-penalty 1.05
+      --ctx-size ${ctx-default}
+
+  qwen-2.5-1.5b-instruct:
+    checkpoint: Qwen/Qwen2.5-1.5B-Instruct:Q4_K_M
+    args: |
+      ${reasoning-off}
+      --temp 0.8
+      --top-k 20
+      --min-p 0.05
+      --top-p 0.95
+      --repeat-penalty 1.05
+      --ctx-size ${ctx-default}
+
+  qwen-2.5-1.5b-think:
+    checkpoint: Qwen/Qwen2.5-1.5B-Instruct:Q4_K_M
+    args: |
+      ${reasoning-on}
+      --temp 0.8
+      --top-k 20
+      --min-p 0.05
+      --top-p 0.95
+      --repeat-penalty 1.05
+      --ctx-size ${ctx-default}
+
+  nested-params:
+    checkpoint: unsloth/Llama-3.2-1B-Instruct:Q4_K_M
+    args: |
+      ${reasoning-off}
+      --temp 0.7
+      --ctx-size ${ctx-default}
+    extra:
+      endpoint_url: "http://localhost:${PORT}/v1"
+      auth_header: "Bearer token-${TOKEN}"
+      tags:
+        - gpu
+        - "${PORT}-instance"
