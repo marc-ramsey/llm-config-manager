@@ -3,7 +3,6 @@ import json
 import logging
 import os
 import re
-import shlex
 from typing import Any, Dict, List, Optional, Union
 
 import yaml
@@ -234,110 +233,6 @@ class ConfigManager:
         # Return a copy so callers can inspect without mutating the original.
         result = dict(be) if isinstance(be, dict) else {}
         return result
-
-    def _resolve_backend_for_model(
-        self,
-        model: Dict[str, Any],
-        model_name: str,
-        env_vars: Optional[Dict[str, Any]],
-        override_backend: Optional[str] = None,
-    ) -> str:
-        """Determine which backend ID to use for a given model.
-
-        Resolution order (first match wins):
-        1. *override_backend* argument (runtime call-time override)
-        2. ``model[backend]`` key (per-model YAML default)
-        3. ``backends.default`` (global default)
-
-        Returns the resolved backend ID string.
-        """
-        if override_backend:
-            return override_backend
-
-        model_backend = model.get('backend')
-        if model_backend:
-            return str(model_backend)
-
-        global_default = self.data.get('backends', {})
-        if isinstance(global_default, dict):
-            default_id = global_default.get('default')
-            if default_id:
-                return str(default_id)
-
-        raise RuntimeError(
-            f"No backend specified for model '{model_name}' "
-            "(no override, no per-model 'backend' key, no 'backends.default')"
-        )
-
-    def assemble_command(
-        self,
-        model_name: str,
-        env_vars: Optional[Dict[str, Any]] = None,
-        override_backend: Optional[str] = None,
-    ) -> Optional[tuple[List[str], str]]:
-        """Assemble command arguments for *model_name* using the backend config.
-
-        Resolves the effective backend, fills template placeholders
-        (``${CHECKPOINT}``, ``${PORT}``), and concatenates backend arguments
-        with model-specific arguments.
-
-        Args:
-            model_name:   Model name as defined in the config file.
-            env_vars:     Runtime environment variables for resolving
-                          ``${PORT}`` and other placeholders.  If omitted,
-                          unresolved placeholders are left as-is (strict mode).
-            override_backend: Optional backend ID that overrides whichever
-                              backend the model would normally use.
-
-        Returns:
-            A tuple of ``(arg_list, cmd_str)`` where ``arg_list`` is a list
-            of individual arguments ready for ``subprocess_exec``,
-            and ``cmd_str`` is the space-joined string representation.
-        """
-        models = self.get_vector('models')
-        if not models:
-            return None
-        model = models.get(model_name)
-        if model is None:
-            return None
-
-        # 1. Resolve which backend to use
-        backend_id = self._resolve_backend_for_model(model, model_name, env_vars, override_backend)
-
-        # 2. Get backend definition
-        backend = self.get_backend(backend_id)
-        if backend is None:
-            raise RuntimeError(
-                f"Backend '{backend_id}' not found in backends config"
-            )
-
-        # 3. Resolve CHECKPOINT and PORT
-        checkpoint = model.get('checkpoint', '')
-        port = env_vars.get('PORT') if env_vars is not None else None
-        if port is None:
-            port = str(self.data.get('models-start-port', 18000))
-
-        # Build a temporary macro map for this resolution pass
-        resolve_macros = dict(self.data.get('macros', {}))
-        resolve_macros['CHECKPOINT'] = checkpoint
-        resolve_macros['PORT'] = port
-
-        # 4. Resolve backend args template against this context
-        backend_args_template = str(backend.get('args', ''))
-        backend_args_resolved = self._resolve_string(backend_args_template, resolve_macros, strict=False)
-
-        # 5. Get model args (already whitespace-normalized by _traverse at boot time)
-        model_args = model.get('args', '')
-        if isinstance(model_args, str):
-            model_args = ' '.join(model_args.split())  # ensure single-space
-        else:
-            model_args = str(model_args) if model_args else ''
-
-        # 6. Build command args: resolved backend args + model args
-        combined = shlex.split(backend_args_resolved) if backend_args_resolved.strip() else []
-        combined += shlex.split(model_args) if model_args.strip() else []
-
-        return (combined, ' '.join(combined))
 
 # ── CLI entry point ───────────────────────────────
 

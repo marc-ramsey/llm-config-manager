@@ -37,13 +37,6 @@ names = cm.get_models()  # → ["my-model", "other-model"]
 # Get backend definition
 backend = cm.get_backend("process")
 
-# Assemble command arguments from the model's backend config
-result = cm.assemble_command(
-    "my-model",
-    env_vars={"PORT": "8081"}
-)
-# result → (['--port', '8081', '--ctx-size', '4096'], "--port 8081 --ctx-size 4096")
-
 # Export the full config to a file
 cm.export("full_dump.yml")                       # YAML (default)
 cm.export("full_dump.json", fmt='json')          # JSON
@@ -68,7 +61,6 @@ llm-config-manager --input config.yaml --export models.json
 | `cm.get_vector(key) → dict \| None` | Get a top-level section (e.g. `macros`, `models`). |
 | `cm.get_model(name, env_vars=None) → dict \| None` | Resolved model config dict. |
 | `cm.get_models() → list[str]` | All available model names. |
-| `cm.assemble_command(name, env_vars=None) → (list, str)` | Assembled arguments for a model's backend. |
 
 ## Configuration Format (YAML)
 
