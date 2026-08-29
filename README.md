@@ -25,17 +25,15 @@ from llm_config_manager import ConfigManager
 cm = ConfigManager("config.yaml")
 full_config = cm.get_dict()
 
-# Look up a single model (raw — unresolved ${PORT} etc.)
-model_cfg = cm.get_model("my-model")
+# Path-based access (``/`` separator)
+m1 = cm["models/my-model"]              # → nested dict lookup
+rocm = cm["backends/rocm"]              # → backend section
+cm["models/m2"] = {"checkpoint": "..."} # creates entry in-place
 
-# Runtime env var injection — resolves ${PORT}, ${TOKEN}, etc.
-model = cm.get_model("my-model", env_vars={"PORT": "8081", "TOKEN": "abc"})
-
-# List all model names
-names = cm.get_models()  # → ["my-model", "other-model"]
-
-# Get backend definition
-backend = cm.get_backend("process")
+# Iteration and containment
+for key in cm: print(key)
+if "macros" in cm: …
+len(cm)  # number of top-level sections
 
 # Export the full config to a file
 cm.export("full_dump.yml")                       # YAML (default)
@@ -59,9 +57,11 @@ llm-config-manager --input config.yaml --export models.json
 | `cm.export(path, fmt='yaml')` | Write config to file (`'json'` or `'yaml'`). |
 | `cm.get_dict() → dict` | Complete macro-expanded config. |
 | `cm.merge(update: dict) → dict` | Deep-merge *update* into ``self.data`` (recursive). |
-| `cm.get_vector(key) → dict \| None` | Get a top-level section (e.g. `macros`, `models`). |
-| `cm.get_model(name, env_vars=None) → dict \| None` | Resolved model config dict. |
-| `cm.get_models() → list[str]` | All available model names. |
+| `cm["key"]` / `cm["path/to/key"]` | Access or set config by ``/``-separated path. |
+| `del cm["key"]` | Remove a top-level key. |
+| `for k in cm:` | Iterate over top-level keys. |
+| `len(cm)` | Number of top-level sections. |
+| `"key" in cm` | Check existence of a top-level key. |
 
 ## Configuration Format (YAML)
 

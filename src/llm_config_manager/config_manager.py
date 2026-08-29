@@ -73,6 +73,64 @@ class ConfigManager:
             return base
         return _recurse(self.data, update)
 
+    # ── Path-based access (``/`` separator) ────────────────────────────
+
+    def _resolve_path(self, path: str) -> Any:
+        """Traverse *path* segments into self.data. Returns the value at that path.
+
+        Segments separated by ``'/'`` are resolved in order.  If any intermediate
+        node is not a ``dict``, the traversal stops and returns the current value.
+        """
+        parts = path.split('/')
+        value: Any = self.data
+        for seg in parts:
+            if isinstance(value, dict):
+                value = value.get(seg)
+                if value is None and seg not in (value or {}):
+                    return None  # key absent at this level
+            else:
+                return None  # intermediate is not a dict
+        return value
+
+    def __getitem__(self, path: str) -> Any:
+        """Access config values by ``'key'`` or ``'path/to/key'`` notation."""
+        val = self._resolve_path(path)
+        if val is None and path not in self.data and '/' not in path:
+            raise KeyError(path)
+        return val
+
+    def __setitem__(self, path: str, value: Any) -> None:
+        """Set a config value by ``'key'`` or ``'path/to/key'`` notation.
+
+        Creates intermediate dicts where needed so that
+        ``cm['a/b/c'] = 1`` works even when ``'a'`` and ``'a.b'`` don't exist yet.
+        """
+        parts = path.split('/')
+        node = self.data
+        for seg in parts[:-1]:
+            if seg not in node or not isinstance(node[seg], dict):
+                node[seg] = {}
+            node = node[seg]
+        node[parts[-1]] = value
+
+    def __delitem__(self, key: str) -> None:
+        """Remove a top-level config key."""
+        if key not in self.data:
+            raise KeyError(key)
+        del self.data[key]
+
+    def __iter__(self):
+        """Iterate over top-level keys."""
+        return iter(self.data)
+
+    def __len__(self) -> int:
+        """Number of top-level config sections."""
+        return len(self.data)
+
+    def __contains__(self, key: str) -> bool:
+        """Check if a top-level key exists."""
+        return key in self.data
+
     # ── Macro / string resolution ────────────────────────────────────────
 
     def _resolve_string(
@@ -203,47 +261,6 @@ class ConfigManager:
     def get_vector(self, key: str) -> Union[Dict[str, Any], None]:
         """Retrieve a top-level config section (e.g. ``'macros'``, ``'models'``)."""
         return self.data.get(key)
-    def get_models(self) -> list[str]:
-        """Return a list of all available model names."""
-        models = self.get_vector('models')
-        return list(models.keys()) if models else []
-
-    def get_model(
-        self, model_name: str, env_vars: Optional[Dict[str, Any]] = None
-    ) -> Union[Dict[str, Any], None]:
-        """Return the config dict for a named model.
-
-        If *env_vars* is provided the model's string values are resolved
-        against them (*strict=True*).  An empty dict ``{}`` still triggers
-        traversal (previously it was silently skipped because ``{}`` is falsy).
-        """
-        models = self.get_vector('models')
-        model = models.get(model_name) if models else None
-        if model is None:
-            return None
-        if env_vars is not None:
-            return self._traverse(model, env_vars, strict=self.strict_expansion)
-        # Always normalize whitespace, but without strict mode so unresolved
-        # placeholders (e.g. $PORT) survive for later runtime resolution.
-        return self._traverse(model, {}, strict=False)
-
-    def get_backend(
-        self, backend_id: str
-    ) -> Union[Dict[str, Any], None]:
-        """Return the backend dict for *backend_id*.
-
-        Returns a new dictionary containing all fields from the config.yaml
-        ``backends`` entry.  Returns **None** if the backend does not exist.
-        """
-        backends = self.data.get('backends')
-        if not backends or not isinstance(backends, dict):
-            return None
-        be = backends.get(backend_id)
-        if be is None:
-            return None
-        # Return a copy so callers can inspect without mutating the original.
-        result = dict(be) if isinstance(be, dict) else {}
-        return result
 
 # ── CLI entry point ───────────────────────────────
 
