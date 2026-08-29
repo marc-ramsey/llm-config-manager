@@ -62,6 +62,17 @@ class ConfigManager:
                 f"Unexpected error loading config file: {e}"
             ) from e
 
+    def merge(self, update: dict) -> dict:
+        """Deep-merge *update* into ``self.data``, returning it."""
+        def _recurse(base: dict, override: dict) -> dict:
+            for k, v in override.items():
+                if k in base and isinstance(base[k], dict) and isinstance(v, dict):
+                    _recurse(base[k], v)
+                else:
+                    base[k] = v
+            return base
+        return _recurse(self.data, update)
+
     # ── Macro / string resolution ────────────────────────────────────────
 
     def _resolve_string(

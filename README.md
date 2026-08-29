@@ -58,6 +58,7 @@ llm-config-manager --input config.yaml --export models.json
 |--------|-------------|
 | `cm.export(path, fmt='yaml')` | Write config to file (`'json'` or `'yaml'`). |
 | `cm.get_dict() → dict` | Complete macro-expanded config. |
+| `cm.merge(update: dict) → dict` | Deep-merge *update* into ``self.data`` (recursive). |
 | `cm.get_vector(key) → dict \| None` | Get a top-level section (e.g. `macros`, `models`). |
 | `cm.get_model(name, env_vars=None) → dict \| None` | Resolved model config dict. |
 | `cm.get_models() → list[str]` | All available model names. |
