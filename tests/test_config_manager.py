@@ -62,18 +62,15 @@ class TestInit:
     def test_no_macros_section(self, config_dir):
         p = _write(config_dir, "nomac.yaml", NO_MODELS_YAML)
         cm = ConfigManager(p)
-        assert cm.get_vector("macros") is None
+        assert cm.data.get("macros") is None
 
 
 # ── Strict expansion (fail-fast) ────────────────────────────────────────────
 
-class TestStrictExpansion:
-    def test_unresolved_placeholder_during_model_get(self, config_manager):
-        """${PORT} is a boot-time placeholder that survives as literal text;
-        passing env_vars without it should raise in strict mode."""
-        with pytest.raises(ValueError, match="Unresolved placeholder.*\\$PORT"):
-            config_manager.get_model("test-model", {"OTHER": "val"})
+# NOTE: Model-specific resolution tests moved to model_arkestra's
+#       ModelConfigManager. These remain for the boot-time strict mode.
 
+class TestStrictExpansion:
     def test_explicitly_disable_strict(self, tmp_path):
         p = _write(tmp_path, "cfg.yaml", """\
 macros:
@@ -83,35 +80,13 @@ models:
     cmd: "${x} ${MISSING}"
 """)
         cm = ConfigManager(p, strict_expansion=False)
-        # Should NOT raise; unresolved placeholder passes through.
-        model = cm.get_model("m1", {})
+        model = cm._traverse(cm.data["models"]["m1"], {}, strict=False)
         assert "${MISSING}" in model["cmd"]
 
 
 # ── lenient (non-strict) expansion ──────────────────────────────────────────
 
-class TestLenientExpansion:
-    def test_unresolved_passes_through(self, tmp_path):
-        p = _write(tmp_path, "cfg.yaml", """\
-macros: {}
-models:
-  m1:
-    cmd: "${MISSING}"
-""")
-        cm = ConfigManager(p, strict_expansion=False)
-        model = cm.get_model("m1")
-        assert "${MISSING}" in model["cmd"]
-
-    def test_env_vars_resolve_at_runtime(self, tmp_path):
-        p = _write(tmp_path, "cfg.yaml", """\
-models:
-  m1:
-    cmd: "/run/llama --port ${PORT} --ctx ${CTX_SIZE}"
-""")
-        cm = ConfigManager(p, strict_expansion=False)
-        model = cm.get_model("m1", {"PORT": "8080", "CTX_SIZE": "4096"})
-        assert "--port 8080" in model["cmd"]
-        assert "--ctx 4096" in model["cmd"]
+# NOTE: Runtime env-var resolution moved to model_arkestra's ModelConfigManager.
 
 
 # ── Circular macro detection ────────────────────────────────────────────────
@@ -133,13 +108,12 @@ class TestChainedMacros:
         assert cm.data["macros"]["baz"] == "prefix-bar-suffix"
 
     def test_non_string_macro_value(self, config_manager):
-        """Integer macros (ctx-size: 4096) interpolate into strings via str()."""
-        model = config_manager.get_model("test-model")
-        # ${ctx-size} (int 4096) must appear as "4096" in the expanded cmd.
-        assert "--ctx 4096" in model["cmd"]
+        """Integer macros (ctx-size: 4096) survive macro expansion as int."""
+        assert isinstance(config_manager.data["macros"]["ctx-size"], int)
+        assert config_manager.data["macros"]["ctx-size"] == 4096
 
     def test_integer_macro_in_boot_expansion(self, tmp_path):
-        """Integer macro values survive boot-time expansion and are accessible."""
+        """Integer macro values survive boot-time expansion."""
         p = _write(tmp_path, "cfg.yaml", """\
 macros:
   max-conn: 99
@@ -149,50 +123,10 @@ models:
     cmd: "${prefix} --max ${max-conn}"
 """)
         cm = ConfigManager(p)
-        # Integer 99 → str(99) = "99" during interpolation.
         assert cm.data["macros"]["max-conn"] == 99
-        model = cm.get_model("m1")
-        assert "start --max 99" in model["cmd"]
 
 
-# ── Model lookup ────────────────────────────────────────────────────────────
-
-class TestModelLookup:
-    def test_get_model_found(self, config_manager):
-        model = config_manager.get_model("test-model")
-        assert model is not None
-        assert isinstance(model["cmd"], str)
-
-    def test_get_model_missing_returns_none(self, config_manager):
-        assert config_manager.get_model("nonexistent") is None
-
-    def test_empty_env_vars_dict_triggers_traversal(self, config_manager):
-        """An explicit empty dict should trigger the traversal pass.
-        In strict mode this raises because ${PORT} can't be resolved."""
-        with pytest.raises(ValueError, match="Unresolved placeholder"):
-            config_manager.get_model("test-model", {})
-
-    def test_none_env_vars_skips_traversal(self, config_manager):
-        """No env_vars → raw cached model (no resolution pass)."""
-        model = config_manager.get_model("test-model")
-        # In strict mode but no traversal, unresolved placeholders survive.
-        assert "${PORT}" in model["cmd"]
-
-    def test_get_models_returns_all_names(self, config_manager):
-        names = config_manager.get_models()
-        assert isinstance(names, list)
-        assert "test-model" in names
-
-    def test_get_models_empty_when_no_models_section(self, tmp_path):
-        p = _write(tmp_path, "cfg.yaml", """\
-macros:
-  x: foo
-""")
-        cm = ConfigManager(p)
-        assert cm.get_models() == []
-
-
-# ── Whitespace normalization ────────────────────────────────────────────────
+# ── Whitespace normalization (via _traverse) ────────────────────────
 
 class TestWhitespaceNormalization:
     def test_newlines_collapsed(self, tmp_path):
@@ -207,9 +141,9 @@ models:
 """
         p = _write(tmp_path, "cfg.yaml", yaml_content)
         cm = ConfigManager(p, strict_expansion=False)
-        model = cm.get_model("m1")
-        assert "\n" not in model["cmd"]
-        assert "line1 line2 line3" == model["cmd"]
+        result = cm._traverse(cm.data["models"]["m1"], {}, strict=False)
+        assert "\n" not in result["cmd"]
+        assert "line1 line2 line3" == result["cmd"]
 
     def test_tabs_collapsed(self, tmp_path):
         yaml_content = """\
@@ -221,9 +155,9 @@ models:
 """
         p = _write(tmp_path, "cfg.yaml", yaml_content)
         cm = ConfigManager(p, strict_expansion=False)
-        model = cm.get_model("m1")
-        assert "\t" not in model["cmd"]
-        assert "part1 part2" == model["cmd"]
+        result = cm._traverse(cm.data["models"]["m1"], {}, strict=False)
+        assert "\t" not in result["cmd"]
+        assert "part1 part2" == result["cmd"]
 
     def test_multiple_spaces_collapsed(self, tmp_path):
         yaml_content = """\
@@ -234,12 +168,12 @@ models:
 """
         p = _write(tmp_path, "cfg.yaml", yaml_content)
         cm = ConfigManager(p, strict_expansion=False)
-        model = cm.get_model("m1")
-        assert "  " not in model["cmd"]
-        assert "hello world" == model["cmd"]
+        result = cm._traverse(cm.data["models"]["m1"], {}, strict=False)
+        assert "  " not in result["cmd"]
+        assert "hello world" == result["cmd"]
 
 
-# ── get_dict / get_vector ──────────────────────────────────────────────────
+# ── get_dict / path-based access ──────────────────────────────────────
 
 class TestAccessors:
     def test_get_dict_returns_full_config(self, config_manager):
@@ -248,12 +182,16 @@ class TestAccessors:
         assert "macros" in d
         assert "models" in d
 
-    def test_get_vector_existing_key(self, config_manager):
-        m = config_manager.get_vector("macros")
+    def test_path_access_existing_key(self, config_manager):
+        m = config_manager["macros"]
         assert isinstance(m, dict)
 
-    def test_get_vector_missing_key(self, config_manager):
-        assert config_manager.get_vector("nonexistent") is None
+    def test_path_access_missing_key_raises(self, config_manager):
+        with pytest.raises(KeyError):
+            _ = config_manager["nonexistent"]
+
+    def test_data_get_missing_returns_none(self, config_manager):
+        assert config_manager.data.get("nonexistent") is None
 
 
 # ── Export helpers ──────────────────────────────────────────────────────────

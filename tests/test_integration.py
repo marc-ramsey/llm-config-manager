@@ -39,27 +39,16 @@ class TestBootExpansion:
 
 
 
-# ── Runtime env_vars resolution ───────────────────────────────────────────
+# ── Runtime env_vars resolution ───────────────────────────────────────
 
-# (assemble_command tests removed — command assembly moved to model-arkestra)
-
-
-# ── Whitespace normalization ──────────────────────────────────────────────
+# (assemble_command and model lookup tests moved to model-arkestra's
+#  ModelConfigManager. Only boot-time expansion remains here.)
 
 
-# ── Model listing ─────────────────────────────────────────────────────────
-
-class TestModelListing:
-    def test_get_models(self, full_config):
-        names = full_config.get_models()
-        assert len(names) == 5
-        expected = {"llama-3.2-1b-instruct", "llama-3.2-1b-think",
-                     "qwen-2.5-1.5b-instruct", "qwen-2.5-1.5b-think",
-                     "nested-params"}
-        assert set(names) == expected
+# ── Whitespace normalization ──────────────────────────────────────────
 
 
-# ── Export formats ────────────────────────────────────────────────────────
+# ── Export formats ────────────────────────────────────────────────────
 
 class TestExports:
     def test_export_json(self, full_config, tmp_path):
@@ -74,15 +63,6 @@ class TestExports:
         loaded = yaml.safe_load(Path(out).read_text())
         assert "macros" in loaded
         assert "models" in loaded
-
-    def test_nested_model_env_vars(self, full_config):
-        """env_vars resolve placeholders at arbitrary nesting depth."""
-        env = {"PORT": "5555", "TOKEN": "abc123"}
-        model = full_config.get_model("nested-params", env_vars=env)
-        assert model["extra"]["endpoint_url"] == "http://localhost:5555/v1"
-        assert model["extra"]["auth_header"] == "Bearer token-abc123"
-        assert "5555-instance" in model["extra"]["tags"]
-        assert "gpu" in model["extra"]["tags"]
 
 
 # ── CLI entry point ────────────────────────────────────────────────────────
