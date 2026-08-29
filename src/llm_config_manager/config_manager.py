@@ -258,9 +258,6 @@ class ConfigManager:
     def get_dict(self) -> Dict[str, Any]:
         """Return the complete, macro-expanded configuration dictionary."""
         return self.data
-    def get_vector(self, key: str) -> Union[Dict[str, Any], None]:
-        """Retrieve a top-level config section (e.g. ``'macros'``, ``'models'``)."""
-        return self.data.get(key)
 
 # ── CLI entry point ───────────────────────────────
 
