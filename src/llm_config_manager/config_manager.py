@@ -75,29 +75,44 @@ class ConfigManager:
 
     # ── Path-based access (``/`` separator) ────────────────────────────
 
-    def _resolve_path(self, path: str) -> Any:
-        """Traverse *path* segments into self.data. Returns the value at that path.
+    def get(self, path: str, default: Any = None) -> Any:
+        """Get a config value by `/`-separated path with optional fallback.
 
         Segments separated by ``'/'`` are resolved in order.  If any intermediate
-        node is not a ``dict``, the traversal stops and returns the current value.
+        node is not a dict or any key is absent, *default* is returned.
+        Explicit ``None`` values are preserved (not replaced by default).
+
+        For error-on-missing semantics use ``__getitem__`` (``cm["a/b"]``).  
         """
         parts = path.split('/')
         value: Any = self.data
         for seg in parts:
-            if isinstance(value, dict):
-                value = value.get(seg)
-                if value is None and seg not in (value or {}):
-                    return None  # key absent at this level
+            if isinstance(value, dict) and seg in value:
+                value = value[seg]
             else:
-                return None  # intermediate is not a dict
+                return default
         return value
 
     def __getitem__(self, path: str) -> Any:
-        """Access config values by ``'key'`` or ``'path/to/key'`` notation."""
-        val = self._resolve_path(path)
-        if val is None and path not in self.data and '/' not in path:
+        """Access config values by ``'key'`` or ``'path/to/key'`` notation.
+
+        Raises ``KeyError`` when the full path cannot be resolved.
+        """
+        val = self.get(path)
+        if val is None and not self._path_exists(path):
             raise KeyError(path)
         return val
+
+    def _path_exists(self, path: str) -> bool:
+        """Return True if *path* resolves to any value in config (including None)."""
+        parts = path.split('/')
+        node = self.data
+        for seg in parts:
+            if isinstance(node, dict) and seg in node:
+                node = node[seg]
+            else:
+                return False
+        return True
 
     def __setitem__(self, path: str, value: Any) -> None:
         """Set a config value by ``'key'`` or ``'path/to/key'`` notation.
