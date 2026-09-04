@@ -25,7 +25,7 @@ class ConfigManager:
     to be filled by *env_vars* at runtime.
     """
 
-    _MACRO_PATTERN = re.compile(r'\$\{([\w-]+)\}')
+    _MACRO_PATTERN = re.compile(r'\$\{([\w/-]+)\}')
     _WHITESPACE_PATTERN = re.compile(r'\s+')
     strict_expansion: bool = True
 
@@ -176,6 +176,9 @@ class ConfigManager:
                     f"Circular macro reference detected: {cycle}"
                 )
             val = current_macros.get(key)
+            # Path-based lookup (e.g. ${defaults/ctx-size}) from config data
+            if val is None and '/' in key:
+                val = self.get(key, default=None)
             if val is None and strict:
                 raise ValueError(
                     f"Unresolved placeholder '${key}' during "
