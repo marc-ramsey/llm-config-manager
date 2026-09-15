@@ -270,7 +270,7 @@ class ConfigManager:
             if fmt == 'json':
                 json.dump(self.data, f, indent=2)
             else:
-                yaml.dump(self.data, f, default_flow_style=False)
+                yaml.dump(self.data, f, default_flow_style=False, sort_keys=False)
 
     # ── Accessors ────────────────────────────────────────────────────────
     def get_dict(self) -> Dict[str, Any]:
