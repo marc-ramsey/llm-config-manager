@@ -128,38 +128,59 @@ models:
 
 # ── Whitespace normalization (via _traverse) ────────────────────────
 
+# NOTE: whitespace collapsing now only applies to strings that contain a
+#       ${...} placeholder (command args). Strings without placeholders are
+#       preserved byte-for-byte so export() round-trips them unchanged.
+
 class TestWhitespaceNormalization:
     def test_newlines_collapsed(self, tmp_path):
         yaml_content = """\
-macros: {}
+macros:
+  prefix: start
 models:
   m1:
     cmd: |
-      line1
+      ${prefix}
       line2
       line3
 """
         p = _write(tmp_path, "cfg.yaml", yaml_content)
         cm = ConfigManager(p, strict_expansion=False)
-        result = cm._traverse(cm.data["models"]["m1"], {}, strict=False)
+        result = cm._traverse(cm.data["models"]["m1"], {}, strict=False, collapse_ws=True)
         assert "\n" not in result["cmd"]
-        assert "line1 line2 line3" == result["cmd"]
+        assert "start line2 line3" == result["cmd"]
 
     def test_tabs_collapsed(self, tmp_path):
         yaml_content = """\
-macros: {}
+macros:
+  prefix: start
 models:
   m1:
     cmd: |
-      \t\tpart1\tpart2
+      \t\t${prefix}\tpart2
 """
         p = _write(tmp_path, "cfg.yaml", yaml_content)
         cm = ConfigManager(p, strict_expansion=False)
-        result = cm._traverse(cm.data["models"]["m1"], {}, strict=False)
+        result = cm._traverse(cm.data["models"]["m1"], {}, strict=False, collapse_ws=True)
         assert "\t" not in result["cmd"]
-        assert "part1 part2" == result["cmd"]
+        assert "start part2" == result["cmd"]
 
     def test_multiple_spaces_collapsed(self, tmp_path):
+        yaml_content = """\
+macros:
+  prefix: start
+models:
+  m1:
+    cmd: "${prefix}     world"
+"""
+        p = _write(tmp_path, "cfg.yaml", yaml_content)
+        cm = ConfigManager(p, strict_expansion=False)
+        result = cm._traverse(cm.data["models"]["m1"], {}, strict=False, collapse_ws=True)
+        assert "  " not in result["cmd"]
+        assert "start world" == result["cmd"]
+
+    def test_unplaceholdered_string_preserved(self, tmp_path):
+        """Strings without ${...} keep their original whitespace."""
         yaml_content = """\
 macros: {}
 models:
@@ -168,9 +189,8 @@ models:
 """
         p = _write(tmp_path, "cfg.yaml", yaml_content)
         cm = ConfigManager(p, strict_expansion=False)
-        result = cm._traverse(cm.data["models"]["m1"], {}, strict=False)
-        assert "  " not in result["cmd"]
-        assert "hello world" == result["cmd"]
+        result = cm._traverse(cm.data["models"]["m1"], {}, strict=False, collapse_ws=True)
+        assert result["cmd"] == "hello     world"
 
 
 # ── get_dict / path-based access ──────────────────────────────────────

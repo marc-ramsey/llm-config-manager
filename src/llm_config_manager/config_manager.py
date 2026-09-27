@@ -1,4 +1,5 @@
 import argparse
+import copy
 import json
 import logging
 import os
@@ -63,13 +64,19 @@ class ConfigManager:
             ) from e
 
     def merge(self, update: dict) -> dict:
-        """Deep-merge *update* into ``self.data``, returning it."""
+        """Deep-merge *update* into ``self.data``, returning it.
+
+        Nested dicts from *update* are copied on insert so later mutation of
+        the caller's dict never aliases config state.
+        """
         def _recurse(base: dict, override: dict) -> dict:
             for k, v in override.items():
-                if k in base and isinstance(base[k], dict) and isinstance(v, dict):
-                    _recurse(base[k], v)
+                if isinstance(v, dict):
+                    base[k] = _recurse(
+                        base[k] if isinstance(base.get(k), dict) else {}, v
+                    )
                 else:
-                    base[k] = v
+                    base[k] = copy.deepcopy(v)
             return base
         return _recurse(self.data, update)
 
@@ -152,18 +159,18 @@ class ConfigManager:
         self,
         text: str,
         current_macros: Dict[str, Any],
-        seen: Optional[set] = None,
+        seen: Optional[list] = None,
         strict: bool = False,
     ) -> str:
         """Replace all ``${KEY}`` placeholders with values from *current_macros*.
 
-        When *seen* is provided (during macro expansion), unresolved references
-        to already-being-resolved macros raise a ``RuntimeError``.  When *strict*
-        is True (during runtime env_vars resolution), any unresolved placeholder
-        raises a ``ValueError`` instead of passing through unchanged.
+        When *seen* is provided (during macro expansion), a reference to an
+        already-being-resolved macro raises a ``RuntimeError`` naming the cycle
+        in reference order.  When *strict* is True (runtime env_vars resolution),
+        any unresolved placeholder raises a ``ValueError`` instead of passing
+        through unchanged.
 
-        Otherwise up to 10 iterations resolve chained references, then whitespace
-        collapses.
+        Otherwise up to 10 iterations resolve chained references.
         """
         if not isinstance(text, str):
             return text
@@ -171,7 +178,7 @@ class ConfigManager:
         def _repl(m: 're.Match') -> str:
             key = m.group(1)
             if seen is not None and key in seen:
-                cycle = " -> ".join(list(seen) + [key])
+                cycle = " -> ".join(seen + [key])
                 raise RuntimeError(
                     f"Circular macro reference detected: {cycle}"
                 )
@@ -181,7 +188,7 @@ class ConfigManager:
                 val = self.get(key, default=None)
             if val is None and strict:
                 raise ValueError(
-                    f"Unresolved placeholder '${key}' during "
+                    f"Unresolved placeholder '${{{key}}}' during "
                     "env_vars resolution"
                 )
             if val is None:
@@ -193,10 +200,14 @@ class ConfigManager:
             if new_text == text:
                 break
             text = new_text
-        return self._WHITESPACE_PATTERN.sub(' ', text).strip()
+        return text
 
     def _traverse(
-        self, node: Any, current_macros: Dict[str, Any], strict: bool = False
+        self,
+        node: Any,
+        current_macros: Dict[str, Any],
+        strict: bool = False,
+        collapse_ws: bool = False,
     ) -> Any:
         """Recursively resolve string nodes under *node*.
 
@@ -204,15 +215,24 @@ class ConfigManager:
         placeholders raise a ``ValueError``.  Boot-time traversal uses
         *strict=False* so runtime-only placeholders like :py:data:`$PORT`
         survive until the explicit :meth:`get_model` call.
+
+        *collapse_ws* limits whitespace collapsing to strings that actually
+        contain a placeholder, leaving untouched values (paths, names) intact.
         """
         if isinstance(node, dict):
             return {
-                k: self._traverse(v, current_macros, strict) for k, v in node.items()
+                k: self._traverse(v, current_macros, strict, collapse_ws)
+                for k, v in node.items()
             }
         elif isinstance(node, list):
-            return [self._traverse(v, current_macros, strict) for v in node]
+            return [
+                self._traverse(v, current_macros, strict, collapse_ws) for v in node
+            ]
         elif isinstance(node, str):
-            return self._resolve_string(node, current_macros, strict=strict)
+            resolved = self._resolve_string(node, current_macros, strict=strict)
+            if collapse_ws and self._MACRO_PATTERN.search(node):
+                return self._WHITESPACE_PATTERN.sub(' ', resolved).strip()
+            return resolved
         return node
 
     # ── Boot-time macro expansion ────────────────────────────────────────
@@ -228,28 +248,28 @@ class ConfigManager:
         if not macros:
             return
 
-        def _resolve_macro(name: str, seen: set) -> Any:
-            if name in seen:
-                cycle = " -> ".join(list(seen) + [name])
-                raise RuntimeError(
-                    f"Circular macro reference detected: {cycle}"
-                )
-
+        def _resolve_macro(name: str, seen: list) -> Any:
+            # Cycles are raised by _resolve_string._repl with the full chain.
             value = macros.get(name)
             if isinstance(value, str):
-                seen.add(name)
-                resolved = self._resolve_string(value, macros, seen)
-                seen.remove(name)
-                return resolved
+                seen.append(name)
+                try:
+                    return self._resolve_string(value, macros, seen)
+                finally:
+                    seen.pop()
             # Non-string (int, list, etc.) – leave untouched.
             return value
 
         expanded_macros: Dict[str, Any] = {}
         for k in macros:
-            expanded_macros[k] = _resolve_macro(k, set())
+            expanded_macros[k] = _resolve_macro(k, [])
 
-        # Apply expanded macros to the entire configuration tree.
-        self.data = self._traverse(self.data, expanded_macros)  # strict=False
+        # Apply expanded macros to the entire configuration tree. Whitespace is
+        # collapsed only in strings that contained placeholders (command args),
+        # so other values survive byte-for-byte into export().
+        self.data = self._traverse(
+            self.data, expanded_macros, strict=False, collapse_ws=True
+        )
 
         # Store the expanded macro dict back onto the data for external callers.
         self.data['macros'] = expanded_macros
