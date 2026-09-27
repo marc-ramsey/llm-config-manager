@@ -164,16 +164,25 @@ class ConfigManager:
     ) -> str:
         """Replace all ``${KEY}`` placeholders with values from *current_macros*.
 
-        When *seen* is provided (during macro expansion), a reference to an
-        already-being-resolved macro raises a ``RuntimeError`` naming the cycle
-        in reference order.  When *strict* is True (runtime env_vars resolution),
-        any unresolved placeholder raises a ``ValueError`` instead of passing
-        through unchanged.
+        Resolution is recursive so *seen* mirrors the expansion call stack:
+        a key is on *seen* only while its value is being expanded.  A
+        reference to a key already on the stack raises ``RuntimeError`` naming
+        the cycle in reference order; a diamond (two branches sharing an
+        ancestor) resolves fine because the shared key is popped before the
+        second branch reaches it.
 
-        Otherwise up to 10 iterations resolve chained references.
+        When *strict* is True (runtime env_vars resolution), any unresolved
+        placeholder raises a ``ValueError`` instead of passing through.
         """
         if not isinstance(text, str):
             return text
+
+        def _lookup(key: str) -> Any:
+            val = current_macros.get(key)
+            # Path-based lookup (e.g. ${defaults/ctx-size}) from config data
+            if val is None and '/' in key:
+                val = self.get(key, default=None)
+            return val
 
         def _repl(m: 're.Match') -> str:
             key = m.group(1)
@@ -182,10 +191,7 @@ class ConfigManager:
                 raise RuntimeError(
                     f"Circular macro reference detected: {cycle}"
                 )
-            val = current_macros.get(key)
-            # Path-based lookup (e.g. ${defaults/ctx-size}) from config data
-            if val is None and '/' in key:
-                val = self.get(key, default=None)
+            val = _lookup(key)
             if val is None and strict:
                 raise ValueError(
                     f"Unresolved placeholder '${{{key}}}' during "
@@ -193,14 +199,17 @@ class ConfigManager:
                 )
             if val is None:
                 return m.group(0)  # pass through; not in current_macros
+            if isinstance(val, str):
+                if seen is not None:
+                    seen.append(key)
+                    try:
+                        return self._resolve_string(val, current_macros, seen, strict)
+                    finally:
+                        seen.pop()
+                return val
             return str(val)
 
-        for _ in range(10):
-            new_text = self._MACRO_PATTERN.sub(_repl, text)
-            if new_text == text:
-                break
-            text = new_text
-        return text
+        return self._MACRO_PATTERN.sub(_repl, text)
 
     def _traverse(
         self,
