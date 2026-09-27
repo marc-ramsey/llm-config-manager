@@ -30,14 +30,20 @@ class ConfigManager:
     _WHITESPACE_PATTERN = re.compile(r'\s+')
     strict_expansion: bool = True
 
-    def __init__(self, config_path: str, strict_expansion: Optional[bool] = None):
+    def __init__(
+        self,
+        config_path: str,
+        strict_expansion: Optional[bool] = None,
+        expand_macros: bool = True,
+    ):
         self.config_path = config_path
         self.strict_expansion = (
             strict_expansion if strict_expansion is not None else self.strict_expansion
         )
         self.data: Dict[str, Any] = {}
         self._load_config()
-        self._expand_macros()
+        if expand_macros:
+            self._expand_macros()
 
     # ------------------------------------------------------------------ I/O
 
